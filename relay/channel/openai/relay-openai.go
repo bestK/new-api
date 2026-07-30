@@ -117,6 +117,9 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	var responseTextBuilder strings.Builder
 	var toolCount int
 	var usage = &dto.Usage{}
+	// passthroughUsage only carries the extracted passthrough cost; the `usage`
+	// pointer below can be reassigned mid-stream, which would lose it.
+	var passthroughUsage = &dto.Usage{}
 	var lastStreamData string
 	var secondLastStreamData string // 存储倒数第二个stream data，用于音频模型
 	seenStreamToolCalls := make(map[string]struct{})
@@ -137,6 +140,12 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 			if isAudioModel && lastStreamData != "" {
 				secondLastStreamData = lastStreamData
 			}
+
+			// Passthrough cost usually rides on the usage-bearing chunk rather
+			// than the terminal one, so every chunk is offered to the extractor.
+			// It is collected separately because `usage` may be replaced wholesale
+			// further down (fallback estimate / last-response handling).
+			service.ExtractPassthroughCost(info, passthroughUsage, common.StringToByteSlice(data))
 
 			lastStreamData = data
 			collectStreamFunctionCallNames(data, seenStreamToolCalls, &streamFunctionCallNames)
@@ -184,6 +193,7 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	}
 
 	applyUsagePostProcessing(info, usage, common.StringToByteSlice(lastStreamData))
+	usage.UpstreamCostUSD = passthroughUsage.UpstreamCostUSD
 
 	for _, name := range streamFunctionCallNames {
 		info.CountBillableToolCall(dto.BuildInCallFunctionCall, name)
@@ -289,6 +299,7 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 	}
 
 	applyUsagePostProcessing(info, &simpleResponse.Usage, responseBody)
+	service.ExtractPassthroughCost(info, &simpleResponse.Usage, responseBody)
 
 	switch info.RelayFormat {
 	case types.RelayFormatOpenAI:

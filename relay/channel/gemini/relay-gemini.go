@@ -148,13 +148,12 @@ func geminiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	var usage = &dto.Usage{}
 	var imageCount int
 	var hasBillableUsageMetadata bool
-	var lastStreamData string
 	responseText := strings.Builder{}
 
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
-		if len(data) > 0 {
-			lastStreamData = data
-		}
+		// Passthrough cost may arrive on any chunk (usually the one carrying
+		// usageMetadata), so every chunk is offered to the extractor.
+		service.ExtractPassthroughCost(info, usage, common.StringToByteSlice(data))
 		var geminiResponse dto.GeminiChatResponse
 		if err := common.UnmarshalJsonStr(data, &geminiResponse); err != nil {
 			sr.Stop(fmt.Errorf("unmarshal: %w", err))
@@ -192,11 +191,15 @@ func geminiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	})
 
 	if !hasBillableUsageMetadata {
+		// The branches below replace the usage pointer, which would drop a
+		// passthrough cost already extracted from the stream; carry it over.
+		passthroughCost := usage.UpstreamCostUSD
 		if info.ReceivedResponseCount > 0 {
 			usage = service.ResponseText2Usage(c, responseText.String(), info.UpstreamModelName, info.GetEstimatePromptTokens())
 		} else {
 			usage = &dto.Usage{}
 		}
+		usage.UpstreamCostUSD = passthroughCost
 		if imageCount != 0 && usage.CompletionTokens == 0 {
 			usage.CompletionTokens = imageCount * 1400
 			usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
@@ -206,8 +209,6 @@ func geminiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	} else {
 		patchGeminiZeroCompletionUsage(c, info, usage, responseText.String(), imageCount)
 	}
-
-	service.ExtractPassthroughCost(info, usage, common.StringToByteSlice(lastStreamData))
 
 	return usage, nil
 }

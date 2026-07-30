@@ -23,6 +23,24 @@ For commercial licensing, please contact support@quantumnous.com
 
 export const CHANNEL_TYPE_NEW_API = 60
 
+// Default gjson path where each upstream reports the per-request cost, used by
+// passthrough billing. Keep in sync with passthroughCostPathByChannelType in
+// service/passthrough_cost.go.
+export const PASSTHROUGH_COST_PATH_BY_CHANNEL_TYPE: Record<number, string> = {
+  1: 'usage.cost', // OpenAI
+  14: 'usage.credit_usage', // Anthropic
+  20: 'usage.cost', // OpenRouter
+}
+
+export const PASSTHROUGH_COST_PATH_FALLBACK = 'usage.cost'
+
+export function defaultPassthroughCostPath(channelType: number): string {
+  return (
+    PASSTHROUGH_COST_PATH_BY_CHANNEL_TYPE[channelType] ??
+    PASSTHROUGH_COST_PATH_FALLBACK
+  )
+}
+
 export const CHANNEL_TYPES = {
   0: 'Unknown',
   1: 'OpenAI',

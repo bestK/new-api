@@ -17,7 +17,6 @@ import (
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
-	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 
 	"github.com/bytedance/gopkg/util/gopool"
@@ -307,9 +306,9 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 	summary.ToolCallSurchargeQuota = calculateTextToolCallSurcharge(ctx, relayInfo, &summary)
 
 	// Passthrough billing: when the relay handler extracted a valid upstream cost
-	// (only populated for BillingModePassthrough models, and only after bounds
-	// validation — see ExtractPassthroughCost), the charge is that upstream USD
-	// cost converted to quota, scaled by the group ratio and any OtherRatios.
+	// (only populated for channels with passthrough billing enabled, and only
+	// after bounds validation — see ExtractPassthroughCost), the charge is that
+	// upstream USD cost converted to quota, scaled by group ratio and OtherRatios.
 	// This deliberately bypasses model/completion/cache ratios. When no valid
 	// cost is present (upstream omitted it or it failed validation), fall through
 	// to the local ratio/price branches so the request is never billed as free.
@@ -510,7 +509,7 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	}
 	appendUsageBillingPathForLog(other, common.GetContextKeyBool(ctx, constant.ContextKeyLocalCountTokens), originUsage)
 	if summary.PassthroughCostUSD != nil {
-		other["billing_mode"] = billing_setting.BillingModePassthrough
+		other["billing_mode"] = "passthrough"
 		other["upstream_cost_usd"] = *summary.PassthroughCostUSD
 	}
 	if adminRejectReason != "" {

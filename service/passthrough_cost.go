@@ -3,43 +3,71 @@ package service
 import (
 	"fmt"
 	"math"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
-	"github.com/QuantumNous/new-api/setting/billing_setting"
 
 	"github.com/tidwall/gjson"
 )
 
-// defaultPassthroughCostPath is the gjson path used to read the upstream cost
-// amount when the channel does not configure a custom path. OpenRouter and
-// other OpenAI-compatible channels expose the per-request cost at usage.cost.
-const defaultPassthroughCostPath = "usage.cost"
+// PassthroughMaxCostUSD is the hard upper bound (in USD) for a single request's
+// upstream-reported cost. Upstream cost values are untrusted, so any amount
+// above this ceiling is rejected to prevent runaway or wrapped-negative charges.
+const PassthroughMaxCostUSD = 100.0
 
-// ExtractPassthroughCost reads the upstream-reported cost (USD) from the raw
-// response body and, when valid, stores it on usage.UpstreamCostUSD for
-// passthrough billing at settle time.
+// fallbackPassthroughCostPath is used when a channel neither configures a path
+// nor matches a known channel-type default.
+const fallbackPassthroughCostPath = "usage.cost"
+
+// passthroughCostPathByChannelType maps a channel type to the gjson path where
+// that upstream reports the per-request cost. Channels may override it with an
+// explicit PassthroughCostPath.
+var passthroughCostPathByChannelType = map[int]string{
+	constant.ChannelTypeOpenRouter: "usage.cost",
+	constant.ChannelTypeAnthropic:  "usage.credit_usage",
+	constant.ChannelTypeOpenAI:     "usage.cost",
+}
+
+// DefaultPassthroughCostPath returns the cost path for a channel type, used as
+// the default when the channel has no explicit override.
+func DefaultPassthroughCostPath(channelType int) string {
+	if path, ok := passthroughCostPathByChannelType[channelType]; ok {
+		return path
+	}
+	return fallbackPassthroughCostPath
+}
+
+// ExtractPassthroughCost reads the upstream-reported cost from the raw response
+// body and, when valid, stores it (normalized to USD) on usage.UpstreamCostUSD
+// for passthrough billing at settle time.
 //
-// It is a no-op unless the request's model is configured with
-// BillingModePassthrough. Upstream cost values are untrusted, so the extracted
-// amount is bounded: NaN/Inf and negative values are rejected, and any amount
-// above billing_setting.PassthroughMaxCostUSD is dropped (billing falls back to
-// the local ratio/price) and logged, so a single request can never produce a
-// runaway or wrapped-negative charge.
+// Safe to call per streaming chunk: the cost is reported on an intermediate
+// event (Anthropic puts credit_usage on message_delta, not the terminal
+// message_stop), so callers feed every chunk through and the last chunk that
+// carries a valid amount wins. A chunk without a cost never clears a value
+// already extracted from an earlier one.
+//
+// It is a no-op unless the request's channel has passthrough billing enabled.
+// Upstream cost values are untrusted, so the extracted amount is bounded:
+// NaN/Inf and negative values are rejected, and any amount above
+// PassthroughMaxCostUSD is dropped (billing falls back to the local
+// ratio/price) and logged, so a single request can never produce a runaway or
+// wrapped-negative charge.
 func ExtractPassthroughCost(info *relaycommon.RelayInfo, usage *dto.Usage, responseBody []byte) {
 	if info == nil || usage == nil || len(responseBody) == 0 {
 		return
 	}
-	if !billing_setting.IsPassthrough(info.OriginModelName) {
+	// ChannelMeta is an embedded pointer only populated after InitChannelMeta.
+	if info.ChannelMeta == nil || !info.ChannelOtherSettings.PassthroughBillingEnabled {
 		return
 	}
 
-	path := defaultPassthroughCostPath
-	// ChannelMeta is an embedded pointer that is only populated after
-	// InitChannelMeta; guard against a nil meta before reading channel settings.
-	if info.ChannelMeta != nil && info.ChannelOtherSettings.PassthroughCostPath != "" {
-		path = info.ChannelOtherSettings.PassthroughCostPath
+	path := info.ChannelOtherSettings.PassthroughCostPath
+	if path == "" {
+		path = DefaultPassthroughCostPath(info.ChannelType)
 	}
 
 	result := gjson.GetBytes(responseBody, path)
@@ -56,15 +84,19 @@ func ExtractPassthroughCost(info *relaycommon.RelayInfo, usage *dto.Usage, respo
 	cost := result.Float()
 
 	if math.IsNaN(cost) || math.IsInf(cost, 0) {
-		common.SysError(fmt.Sprintf("passthrough billing: model %s upstream cost is not finite (%v), falling back to local pricing", info.OriginModelName, result.Raw))
+		common.SysError(fmt.Sprintf("passthrough billing: channel #%d model %s upstream cost is not finite (%v), falling back to local pricing", info.ChannelId, info.OriginModelName, result.Raw))
 		return
+	}
+	// Normalize to USD before any bound check so the cap always means USD.
+	if strings.EqualFold(info.ChannelOtherSettings.PassthroughCostUnit, dto.PassthroughCostUnitCents) {
+		cost /= 100
 	}
 	if cost < 0 {
-		common.SysError(fmt.Sprintf("passthrough billing: model %s upstream cost is negative (%g), falling back to local pricing", info.OriginModelName, cost))
+		common.SysError(fmt.Sprintf("passthrough billing: channel #%d model %s upstream cost is negative (%g), falling back to local pricing", info.ChannelId, info.OriginModelName, cost))
 		return
 	}
-	if cost > billing_setting.PassthroughMaxCostUSD {
-		common.SysError(fmt.Sprintf("passthrough billing: model %s upstream cost %g exceeds hard cap %g USD, falling back to local pricing", info.OriginModelName, cost, billing_setting.PassthroughMaxCostUSD))
+	if cost > PassthroughMaxCostUSD {
+		common.SysError(fmt.Sprintf("passthrough billing: channel #%d model %s upstream cost %g USD exceeds hard cap %g, falling back to local pricing", info.ChannelId, info.OriginModelName, cost, PassthroughMaxCostUSD))
 		return
 	}
 

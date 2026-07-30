@@ -141,6 +141,7 @@ import {
   CHANNEL_STATUS_LABELS,
   CHANNEL_TYPE_OPTIONS,
   CHANNEL_TYPE_WARNINGS,
+  defaultPassthroughCostPath,
   ERROR_MESSAGES,
   FIELD_DESCRIPTIONS,
   FIELD_PLACEHOLDERS,
@@ -297,7 +298,9 @@ const SENSITIVE_FORM_FIELDS = [
   'allow_speed',
   'claude_beta_query',
   'disable_task_polling_sleep',
+  'passthrough_billing_enabled',
   'passthrough_cost_path',
+  'passthrough_cost_unit',
   'upstream_model_update_check_enabled',
   'upstream_model_update_auto_sync_enabled',
   'upstream_model_update_ignored_models',
@@ -346,6 +349,7 @@ function hasAdvancedSettingsValues(values: ChannelFormValues): boolean {
     (values.http2_connection_shards != null &&
       values.http2_connection_shards > 1) ||
     values.claude_beta_query ||
+    values.passthrough_billing_enabled ||
     values.passthrough_cost_path?.trim() ||
     values.upstream_model_update_check_enabled ||
     values.upstream_model_update_auto_sync_enabled ||
@@ -4198,27 +4202,95 @@ export function ChannelMutateDrawer({
 
                             <FormField
                               control={form.control}
-                              name='passthrough_cost_path'
+                              name='passthrough_billing_enabled'
                               render={({ field }) => (
-                                <FormItem>
-                                  <FormLabel>
-                                    {t('Passthrough Cost Path')}
-                                  </FormLabel>
+                                <FormItem className='flex items-center justify-between gap-3'>
+                                  <div className='space-y-0.5'>
+                                    <FormLabel className='text-sm'>
+                                      {t('Passthrough Billing')}
+                                    </FormLabel>
+                                    <FormDescription>
+                                      {t(
+                                        'Bill using the cost returned by this upstream instead of local ratios. Requires the upstream to report a per-request cost.'
+                                      )}
+                                    </FormDescription>
+                                  </div>
                                   <FormControl>
-                                    <Input
-                                      placeholder='usage.cost'
-                                      {...field}
+                                    <Switch
+                                      checked={field.value}
+                                      onCheckedChange={field.onChange}
                                     />
                                   </FormControl>
-                                  <FormDescription>
-                                    {t(
-                                      'gjson path to the upstream cost amount (USD) used for passthrough billing. Leave empty to use the default usage.cost. Only applies to models set to passthrough billing mode.'
-                                    )}
-                                  </FormDescription>
-                                  <FormMessage />
                                 </FormItem>
                               )}
                             />
+
+                            {form.watch('passthrough_billing_enabled') && (
+                              <>
+                                <FormField
+                                  control={form.control}
+                                  name='passthrough_cost_path'
+                                  render={({ field }) => (
+                                    <FormItem>
+                                      <FormLabel>
+                                        {t('Passthrough Cost Path')}
+                                      </FormLabel>
+                                      <FormControl>
+                                        <Input
+                                          placeholder={defaultPassthroughCostPath(
+                                            currentType
+                                          )}
+                                          {...field}
+                                        />
+                                      </FormControl>
+                                      <FormDescription>
+                                        {t(
+                                          'gjson path to the cost amount in the upstream response. Leave empty to use this channel type default:'
+                                        )}{' '}
+                                        <code>
+                                          {defaultPassthroughCostPath(
+                                            currentType
+                                          )}
+                                        </code>
+                                      </FormDescription>
+                                      <FormMessage />
+                                    </FormItem>
+                                  )}
+                                />
+
+                                <FormField
+                                  control={form.control}
+                                  name='passthrough_cost_unit'
+                                  render={({ field }) => (
+                                    <FormItem>
+                                      <FormLabel>
+                                        {t('Passthrough Cost Unit')}
+                                      </FormLabel>
+                                      <Select
+                                        items={[
+                                          {
+                                            value: 'usd',
+                                            label: t('USD (dollars)'),
+                                          },
+                                          {
+                                            value: 'cents',
+                                            label: t('Cents (divide by 100)'),
+                                          },
+                                        ]}
+                                        value={field.value || 'usd'}
+                                        onValueChange={field.onChange}
+                                      />
+                                      <FormDescription>
+                                        {t(
+                                          'Unit of the extracted amount. Choose Cents when the upstream reports credits in cents.'
+                                        )}
+                                      </FormDescription>
+                                      <FormMessage />
+                                    </FormItem>
+                                  )}
+                                />
+                              </>
+                            )}
 
                             <FormField
                               control={form.control}

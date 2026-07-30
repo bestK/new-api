@@ -5,17 +5,12 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
-	"github.com/QuantumNous/new-api/service"
 )
 
 func applyUsagePostProcessing(info *relaycommon.RelayInfo, usage *dto.Usage, responseBody []byte) {
 	if info == nil || usage == nil {
 		return
 	}
-
-	// Passthrough billing: extract and validate the upstream cost (if this model
-	// bills via passthrough) before any channel-specific token adjustments.
-	service.ExtractPassthroughCost(info, usage, responseBody)
 
 	switch info.ChannelType {
 	case constant.ChannelTypeDeepSeek:
