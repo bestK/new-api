@@ -201,6 +201,9 @@ func ClaudeStreamHandler(c *gin.Context, resp *http.Response, info *relaycommon.
 	}
 	var err *types.NewAPIError
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
+		// Passthrough cost is reported on message_delta, not on the terminal
+		// message_stop, so every chunk is offered to the extractor.
+		service.ExtractPassthroughCost(info, claudeInfo.Usage, common.StringToByteSlice(data))
 		err = HandleStreamResponseData(c, info, claudeInfo, data)
 		if err != nil {
 			sr.Stop(err)
@@ -284,5 +287,6 @@ func ClaudeHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayI
 	if handleErr != nil {
 		return nil, handleErr
 	}
+	service.ExtractPassthroughCost(info, claudeInfo.Usage, responseBody)
 	return claudeInfo.Usage, nil
 }

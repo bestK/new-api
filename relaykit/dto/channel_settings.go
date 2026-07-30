@@ -85,7 +85,26 @@ type ChannelOtherSettings struct {
 	UpstreamModelUpdateLastRemovedModels  []string              `json:"upstream_model_update_last_removed_models,omitempty"`  // 上次检测到的可删除模型
 	UpstreamModelUpdateIgnoredModels      []string              `json:"upstream_model_update_ignored_models,omitempty"`       // 手动忽略的模型
 	AdvancedCustom                        *AdvancedCustomConfig `json:"advanced_custom,omitempty"`
+	// PassthroughBillingEnabled bills every request on this channel using the
+	// cost amount reported by the upstream response instead of local ratios.
+	// Passthrough is a per-channel trust decision: the same model name can be
+	// served by several upstreams, and only some of them return a usable cost.
+	PassthroughBillingEnabled bool `json:"passthrough_billing_enabled,omitempty"`
+	// PassthroughCostPath is a gjson path into the upstream response body used to
+	// extract the cost amount for passthrough billing. Empty falls back to the
+	// channel-type default (see DefaultPassthroughCostPath).
+	PassthroughCostPath string `json:"passthrough_cost_path,omitempty"`
+	// PassthroughCostUnit declares the unit of the extracted amount so it can be
+	// normalized to USD. "" / "usd" means the value is already USD; "cents" means
+	// it must be divided by 100.
+	PassthroughCostUnit string `json:"passthrough_cost_unit,omitempty"`
 }
+
+// Passthrough cost units accepted by PassthroughCostUnit.
+const (
+	PassthroughCostUnitUSD   = "usd"
+	PassthroughCostUnitCents = "cents"
+)
 
 func (s *ChannelOtherSettings) IsOpenRouterEnterprise() bool {
 	if s == nil || s.OpenRouterEnterprise == nil {

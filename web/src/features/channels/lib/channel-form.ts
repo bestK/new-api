@@ -275,6 +275,10 @@ export const channelFormSchema = z
     allow_speed: z.boolean().optional(), // Anthropic: speed mode control
     claude_beta_query: z.boolean().optional(), // Anthropic: beta query passthrough
     disable_task_polling_sleep: z.boolean().optional(),
+    // Passthrough billing: bill using the cost reported by this upstream
+    passthrough_billing_enabled: z.boolean().optional(),
+    passthrough_cost_path: z.string().optional(), // gjson path; empty = channel-type default
+    passthrough_cost_unit: z.enum(['usd', 'cents']).optional(),
     // Upstream model update settings (stored in settings JSON)
     upstream_model_update_check_enabled: z.boolean().optional(),
     upstream_model_update_auto_sync_enabled: z.boolean().optional(),
@@ -447,6 +451,9 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   allow_speed: false,
   claude_beta_query: false,
   disable_task_polling_sleep: false,
+  passthrough_billing_enabled: false,
+  passthrough_cost_path: '',
+  passthrough_cost_unit: 'usd',
   upstream_model_update_check_enabled: false,
   upstream_model_update_auto_sync_enabled: false,
   upstream_model_update_ignored_models: '',
@@ -512,6 +519,9 @@ export function transformChannelToFormDefaults(
   let allowSpeed = false
   let claudeBetaQuery = false
   let disableTaskPollingSleep = false
+  let passthroughBillingEnabled = false
+  let passthroughCostPath = ''
+  let passthroughCostUnit: 'usd' | 'cents' = 'usd'
   let upstreamModelUpdateCheckEnabled = false
   let upstreamModelUpdateAutoSyncEnabled = false
   let upstreamModelUpdateIgnoredModels = ''
@@ -532,6 +542,12 @@ export function transformChannelToFormDefaults(
       allowSpeed = parsed.allow_speed === true
       claudeBetaQuery = parsed.claude_beta_query === true
       disableTaskPollingSleep = parsed.disable_task_polling_sleep === true
+      passthroughBillingEnabled = parsed.passthrough_billing_enabled === true
+      passthroughCostPath =
+        typeof parsed.passthrough_cost_path === 'string'
+          ? parsed.passthrough_cost_path
+          : ''
+      passthroughCostUnit = parsed.passthrough_cost_unit === 'cents' ? 'cents' : 'usd'
       upstreamModelUpdateCheckEnabled =
         parsed.upstream_model_update_check_enabled === true
       upstreamModelUpdateAutoSyncEnabled =
@@ -590,6 +606,9 @@ export function transformChannelToFormDefaults(
     allow_speed: allowSpeed,
     claude_beta_query: claudeBetaQuery,
     disable_task_polling_sleep: disableTaskPollingSleep,
+    passthrough_billing_enabled: passthroughBillingEnabled,
+    passthrough_cost_path: passthroughCostPath,
+    passthrough_cost_unit: passthroughCostUnit,
     allow_safety_identifier: allowSafetyIdentifier,
     upstream_model_update_check_enabled: upstreamModelUpdateCheckEnabled,
     upstream_model_update_auto_sync_enabled: upstreamModelUpdateAutoSyncEnabled,
@@ -718,6 +737,30 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
 
   settingsObj.disable_task_polling_sleep =
     formData.disable_task_polling_sleep === true
+
+  // Passthrough billing: bill using the cost reported by this upstream instead
+  // of local ratios. Path/unit are only persisted while enabled; an empty path
+  // means the backend applies the channel-type default.
+  if (formData.passthrough_billing_enabled === true) {
+    settingsObj.passthrough_billing_enabled = true
+    const passthroughCostPath = String(
+      formData.passthrough_cost_path || ''
+    ).trim()
+    if (passthroughCostPath) {
+      settingsObj.passthrough_cost_path = passthroughCostPath
+    } else if ('passthrough_cost_path' in settingsObj) {
+      delete settingsObj.passthrough_cost_path
+    }
+    if (formData.passthrough_cost_unit === 'cents') {
+      settingsObj.passthrough_cost_unit = 'cents'
+    } else if ('passthrough_cost_unit' in settingsObj) {
+      delete settingsObj.passthrough_cost_unit
+    }
+  } else {
+    delete settingsObj.passthrough_billing_enabled
+    delete settingsObj.passthrough_cost_path
+    delete settingsObj.passthrough_cost_unit
+  }
 
   // Upstream model update settings (for model-fetchable channel types)
   if (MODEL_FETCHABLE_TYPES.has(formData.type)) {
