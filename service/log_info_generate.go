@@ -26,12 +26,28 @@ func attachQuotaSaturationToOther(other map[string]interface{}, clamp *common.Qu
 	if clamp == nil || other == nil {
 		return
 	}
+	adminInfoForLog(other)["quota_saturation"] = clamp.AuditMap()
+}
+
+// attachUpstreamCostToOther records the upstream-reported cost that drove a
+// passthrough charge. It lives under admin_info because it discloses upstream
+// pricing, which non-admin log views must not see.
+func attachUpstreamCostToOther(other map[string]interface{}, costUSD float64) {
+	if other == nil {
+		return
+	}
+	adminInfoForLog(other)["upstream_cost_usd"] = costUSD
+}
+
+// adminInfoForLog returns the log's admin-only sub-map, creating it when absent.
+// Everything nested here is stripped by formatUserLogs for non-admin viewers.
+func adminInfoForLog(other map[string]interface{}) map[string]interface{} {
 	adminInfo, ok := other["admin_info"].(map[string]interface{})
 	if !ok || adminInfo == nil {
 		adminInfo = map[string]interface{}{}
 		other["admin_info"] = adminInfo
 	}
-	adminInfo["quota_saturation"] = clamp.AuditMap()
+	return adminInfo
 }
 
 // attachQuotaSaturation records the request's quota clamp (if any) onto the

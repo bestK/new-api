@@ -510,7 +510,10 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	appendUsageBillingPathForLog(other, common.GetContextKeyBool(ctx, constant.ContextKeyLocalCountTokens), originUsage)
 	if summary.PassthroughCostUSD != nil {
 		other["billing_mode"] = "passthrough"
-		other["upstream_cost_usd"] = *summary.PassthroughCostUSD
+		// The raw upstream cost is admin-only: it exposes upstream pricing, and
+		// nesting it under admin_info reuses the stripping formatUserLogs already
+		// applies for non-admin log views.
+		attachUpstreamCostToOther(other, *summary.PassthroughCostUSD)
 	}
 	if adminRejectReason != "" {
 		other["reject_reason"] = adminRejectReason

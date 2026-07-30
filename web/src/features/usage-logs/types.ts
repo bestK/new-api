@@ -120,6 +120,9 @@ export interface LogOtherData {
     local_count_tokens?: boolean
     usage_billing_path?: UsageBillingPath | string
     channel_affinity?: ChannelAffinityInfo
+    // Upstream-reported cost (USD) behind a passthrough charge. Admin-only: it
+    // discloses upstream pricing, so the backend strips it for non-admins.
+    upstream_cost_usd?: number
     // Top-up audit fields (type=1, admin only)
     payment_method?: string
     callback_payment_method?: string
@@ -193,9 +196,6 @@ export interface LogOtherData {
   billing_mode?: string
   expr_b64?: string
   matched_tier?: string
-  // Set by the backend when billing_mode === 'passthrough': the upstream-reported
-  // cost (USD) that drove the charge instead of local ratios.
-  upstream_cost_usd?: number
   reasoning_effort?: string
   image?: boolean
   image_ratio?: number

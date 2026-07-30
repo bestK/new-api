@@ -240,10 +240,12 @@ function BillingBreakdown(props: {
       label: t('Billing Mode'),
       value: t('Upstream Passthrough'),
     })
-    if (other.upstream_cost_usd != null) {
+    // Admin-only: the raw upstream cost discloses upstream pricing, and the
+    // backend already strips admin_info for non-admin viewers.
+    if (isAdmin && other.admin_info?.upstream_cost_usd != null) {
       rows.push({
         label: t('Upstream Cost'),
-        value: fmtPrice(other.upstream_cost_usd),
+        value: fmtPrice(other.admin_info.upstream_cost_usd),
       })
     }
   } else if (isTieredExpr) {
