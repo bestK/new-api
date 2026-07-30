@@ -201,6 +201,49 @@ func TestExtractPassthroughCostPathMissLeavesCostUnset(t *testing.T) {
 	}
 }
 
+// TestPassthroughPathMissDiagnostic pins the two-phase diagnostic: a per-chunk
+// miss only records the usage it saw (Anthropic's message_start legitimately has
+// usage without credit_usage, so reporting per chunk would spam the log), and the
+// end-of-response reporter fires only when the whole response failed to resolve.
+func TestPassthroughPathMissDiagnostic(t *testing.T) {
+	newInfo := func() *relaycommon.RelayInfo {
+		info := &relaycommon.RelayInfo{
+			OriginModelName: "claude-sonnet",
+			ChannelMeta:     &relaycommon.ChannelMeta{ChannelType: constant.ChannelTypeAnthropic},
+		}
+		info.ChannelOtherSettings.PassthroughBillingEnabled = true
+		return info
+	}
+
+	t.Run("stream resolving on message_delta records no unresolved usage", func(t *testing.T) {
+		info := newInfo()
+		usage := &dto.Usage{}
+		// message_start: usage present, no credit_usage -> remembered, not reported
+		ExtractPassthroughCost(info, usage, []byte(`{"type":"message_start","message":{"usage":{"input_tokens":1,"output_tokens":1}}}`))
+		require.NotEmpty(t, info.PassthroughLastUsageSeen)
+		// message_delta carries the cost -> resolved
+		ExtractPassthroughCost(info, usage, []byte(`{"type":"message_delta","usage":{"credit_usage":0.0147,"input_tokens":4138,"output_tokens":43}}`))
+		require.NotNil(t, usage.UpstreamCostUSD)
+
+		// Resolved responses must not be reported even though a miss was recorded.
+		ReportPassthroughPathMissIfUnresolved(info, usage)
+	})
+
+	t.Run("usage without cost anywhere stays unresolved", func(t *testing.T) {
+		info := newInfo()
+		usage := &dto.Usage{}
+		ExtractPassthroughCost(info, usage, []byte(`{"usage":{"input_tokens":10,"output_tokens":2}}`))
+		assert.Nil(t, usage.UpstreamCostUSD)
+		assert.Contains(t, info.PassthroughLastUsageSeen, "input_tokens")
+	})
+
+	t.Run("chunks without usage record nothing", func(t *testing.T) {
+		info := newInfo()
+		ExtractPassthroughCost(info, &dto.Usage{}, []byte(`{"type":"content_block_delta","delta":{"text":"hi"}}`))
+		assert.Empty(t, info.PassthroughLastUsageSeen)
+	})
+}
+
 func TestExtractPassthroughCostNilSafety(t *testing.T) {
 	// Must not panic on nil/empty inputs, including a nil ChannelMeta.
 	ExtractPassthroughCost(nil, &dto.Usage{}, []byte(`{}`))

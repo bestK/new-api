@@ -214,6 +214,7 @@ func ClaudeStreamHandler(c *gin.Context, resp *http.Response, info *relaycommon.
 	}
 
 	HandleStreamFinalResponse(c, info, claudeInfo)
+	service.ReportPassthroughPathMissIfUnresolved(info, claudeInfo.Usage)
 	return claudeInfo.Usage, nil
 }
 
@@ -288,5 +289,6 @@ func ClaudeHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayI
 		return nil, handleErr
 	}
 	service.ExtractPassthroughCost(info, claudeInfo.Usage, responseBody)
+	service.ReportPassthroughPathMissIfUnresolved(info, claudeInfo.Usage)
 	return claudeInfo.Usage, nil
 }

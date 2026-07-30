@@ -194,6 +194,7 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 
 	applyUsagePostProcessing(info, usage, common.StringToByteSlice(lastStreamData))
 	usage.UpstreamCostUSD = passthroughUsage.UpstreamCostUSD
+	service.ReportPassthroughPathMissIfUnresolved(info, usage)
 
 	for _, name := range streamFunctionCallNames {
 		info.CountBillableToolCall(dto.BuildInCallFunctionCall, name)
@@ -300,6 +301,7 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 
 	applyUsagePostProcessing(info, &simpleResponse.Usage, responseBody)
 	service.ExtractPassthroughCost(info, &simpleResponse.Usage, responseBody)
+	service.ReportPassthroughPathMissIfUnresolved(info, &simpleResponse.Usage)
 
 	switch info.RelayFormat {
 	case types.RelayFormatOpenAI:

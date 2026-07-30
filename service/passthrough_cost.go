@@ -72,7 +72,13 @@ func ExtractPassthroughCost(info *relaycommon.RelayInfo, usage *dto.Usage, respo
 
 	result := gjson.GetBytes(responseBody, path)
 	if !result.Exists() {
-		logPassthroughPathMiss(info, path, responseBody)
+		// Streaming sends several usage-bearing events (Anthropic's message_start
+		// carries usage but never credit_usage), so a per-chunk miss is normal and
+		// must not be reported here. The last usage seen is remembered instead and
+		// ReportPassthroughPathMissIfUnresolved decides once the response is done.
+		if usageNode := findUsageNode(responseBody); usageNode != "" {
+			info.PassthroughLastUsageSeen = usageNode
+		}
 		return
 	}
 
@@ -115,15 +121,41 @@ func ExtractPassthroughCost(info *relaycommon.RelayInfo, usage *dto.Usage, respo
 // carry no usage, so only bodies that look like they should hold a cost (i.e.
 // they contain a usage object) are reported; otherwise every stream would emit
 // dozens of false alarms.
-func logPassthroughPathMiss(info *relaycommon.RelayInfo, path string, responseBody []byte) {
-	usageNode := gjson.GetBytes(responseBody, "usage")
-	if !usageNode.Exists() {
+// ReportPassthroughPathMissIfUnresolved is called once a response is fully read.
+// It reports the case where a channel opted into passthrough billing, the
+// upstream did report usage, yet no cost was found at the configured path — so
+// the request silently falls back to local ratios. The observed usage object is
+// included so the correct path can be read straight from the log.
+func ReportPassthroughPathMissIfUnresolved(info *relaycommon.RelayInfo, usage *dto.Usage) {
+	if info == nil || info.ChannelMeta == nil || !info.ChannelOtherSettings.PassthroughBillingEnabled {
 		return
+	}
+	if usage != nil && usage.UpstreamCostUSD != nil {
+		return // resolved
+	}
+	if info.PassthroughLastUsageSeen == "" {
+		return // upstream never reported usage; nothing to diagnose
+	}
+	path := info.ChannelOtherSettings.PassthroughCostPath
+	if path == "" {
+		path = DefaultPassthroughCostPath(info.ChannelType)
 	}
 	common.SysError(fmt.Sprintf(
 		"passthrough billing: channel #%d model %s found no cost at %q; upstream usage was %s. Set the channel's passthrough cost path to the correct field, or disable passthrough billing for this channel.",
-		info.ChannelId, info.OriginModelName, path, truncateForLog(usageNode.Raw, 400),
+		info.ChannelId, info.OriginModelName, path, info.PassthroughLastUsageSeen,
 	))
+}
+
+// findUsageNode returns the raw upstream usage object for diagnostics, checking
+// both the top level and the nesting Anthropic uses on message_start
+// (message.usage). Empty means the body reported no usage at all.
+func findUsageNode(responseBody []byte) string {
+	for _, candidate := range []string{"usage", "message.usage"} {
+		if node := gjson.GetBytes(responseBody, candidate); node.Exists() {
+			return truncateForLog(node.Raw, 400)
+		}
+	}
+	return ""
 }
 
 func truncateForLog(s string, max int) string {

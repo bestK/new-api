@@ -19,6 +19,10 @@ const (
 
 func effectiveBillingUsage(usage *dto.Usage) *dto.Usage {
 	if billingUsage, ok := usageFromBillingUsage(usage); ok {
+		// The remap builds a fresh Usage from token fields only. Passthrough
+		// billing lives on the original usage, so carry it across or the charge
+		// would silently fall back to local ratios.
+		billingUsage.UpstreamCostUSD = usage.UpstreamCostUSD
 		return billingUsage
 	}
 	return usage

@@ -158,6 +158,12 @@ type RelayInfo struct {
 
 	PriceData hosttypes.PriceData
 
+	// PassthroughLastUsageSeen holds the most recent upstream usage object (raw
+	// JSON, truncated) observed while passthrough billing was enabled but no cost
+	// was found at the configured path. Used to emit one diagnostic per response
+	// instead of one per stream chunk.
+	PassthroughLastUsageSeen string
+
 	// QuotaClamp is set (non-nil) when a quota conversion saturated at the
 	// int32 bound (or NaN fallback) while computing this request's charge.
 	// It is surfaced onto the consume/task log's admin_info for auditing.

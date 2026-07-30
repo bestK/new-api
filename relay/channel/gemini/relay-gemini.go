@@ -210,6 +210,8 @@ func geminiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 		patchGeminiZeroCompletionUsage(c, info, usage, responseText.String(), imageCount)
 	}
 
+	service.ReportPassthroughPathMissIfUnresolved(info, usage)
+
 	return usage, nil
 }
 
@@ -374,6 +376,7 @@ func GeminiChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.R
 	// Extract passthrough cost from the original upstream body before the
 	// format-conversion branches below overwrite responseBody.
 	service.ExtractPassthroughCost(info, &usage, responseBody)
+	service.ReportPassthroughPathMissIfUnresolved(info, &usage)
 
 	switch info.RelayFormat {
 	case types.RelayFormatOpenAI:
