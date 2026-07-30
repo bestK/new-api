@@ -193,6 +193,9 @@ export interface LogOtherData {
   billing_mode?: string
   expr_b64?: string
   matched_tier?: string
+  // Set by the backend when billing_mode === 'passthrough': the upstream-reported
+  // cost (USD) that drove the charge instead of local ratios.
+  upstream_cost_usd?: number
   reasoning_effort?: string
   image?: boolean
   image_ratio?: number

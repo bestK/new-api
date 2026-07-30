@@ -4279,7 +4279,25 @@ export function ChannelMutateDrawer({
                                         ]}
                                         value={field.value || 'usd'}
                                         onValueChange={field.onChange}
-                                      />
+                                      >
+                                        <FormControl>
+                                          <SelectTrigger>
+                                            <SelectValue />
+                                          </SelectTrigger>
+                                        </FormControl>
+                                        <SelectContent
+                                          alignItemWithTrigger={false}
+                                        >
+                                          <SelectGroup>
+                                            <SelectItem value='usd'>
+                                              {t('USD (dollars)')}
+                                            </SelectItem>
+                                            <SelectItem value='cents'>
+                                              {t('Cents (divide by 100)')}
+                                            </SelectItem>
+                                          </SelectGroup>
+                                        </SelectContent>
+                                      </Select>
                                       <FormDescription>
                                         {t(
                                           'Unit of the extracted amount. Choose Cents when the upstream reports credits in cents.'

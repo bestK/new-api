@@ -10,6 +10,8 @@
     "Passthrough Billing": "Passthrough Billing",
     "Passthrough Cost Unit": "Passthrough Cost Unit",
     "Unit of the extracted amount. Choose Cents when the upstream reports credits in cents.": "Unit of the extracted amount. Choose Cents when the upstream reports credits in cents.",
+    "Upstream Cost": "Upstream Cost",
+    "Upstream Passthrough": "Upstream Passthrough",
     "USD (dollars)": "USD (dollars)",
     "，": "、",
     ", and": "、および",

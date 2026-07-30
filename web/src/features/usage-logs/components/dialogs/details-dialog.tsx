@@ -225,6 +225,7 @@ function BillingBreakdown(props: {
   const isPerCall = isPerCallBilling(other.model_price)
   const isClaude = other.claude === true
   const isTieredExpr = other.billing_mode === 'tiered_expr'
+  const isPassthrough = other.billing_mode === 'passthrough'
   const tieredSummary = getTieredBillingSummary(other)
 
   const rows: Array<{ label: string; value: string }> = []
@@ -232,7 +233,20 @@ function BillingBreakdown(props: {
   const fmtPrice = (usd: number) => formatBillingCurrencyFromUSD(usd, priceOpts)
   const baseInputUSD = other.model_ratio != null ? other.model_ratio * 2.0 : 0
 
-  if (isTieredExpr) {
+  if (isPassthrough) {
+    // Passthrough bills the upstream-reported cost directly; local model/
+    // completion ratios do not apply, so they are not shown.
+    rows.push({
+      label: t('Billing Mode'),
+      value: t('Upstream Passthrough'),
+    })
+    if (other.upstream_cost_usd != null) {
+      rows.push({
+        label: t('Upstream Cost'),
+        value: fmtPrice(other.upstream_cost_usd),
+      })
+    }
+  } else if (isTieredExpr) {
     rows.push({
       label: t('Billing Mode'),
       value: t('Dynamic Pricing'),
@@ -290,7 +304,7 @@ function BillingBreakdown(props: {
     })
   }
 
-  if (!isTieredExpr && isClaude && hasAnyCacheTokens(other)) {
+  if (!isTieredExpr && !isPassthrough && isClaude && hasAnyCacheTokens(other)) {
     if (other.cache_ratio != null && other.cache_ratio !== 1) {
       rows.push({
         label: t('Cache Read'),
@@ -326,7 +340,7 @@ function BillingBreakdown(props: {
     }
   }
 
-  if (!isTieredExpr) {
+  if (!isTieredExpr && !isPassthrough) {
     if (other.audio_ratio != null && other.audio_ratio !== 1) {
       rows.push({
         label: t('Audio input'),
