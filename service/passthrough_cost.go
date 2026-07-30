@@ -72,6 +72,7 @@ func ExtractPassthroughCost(info *relaycommon.RelayInfo, usage *dto.Usage, respo
 
 	result := gjson.GetBytes(responseBody, path)
 	if !result.Exists() {
+		logPassthroughPathMiss(info, path, responseBody)
 		return
 	}
 
@@ -79,6 +80,7 @@ func ExtractPassthroughCost(info *relaycommon.RelayInfo, usage *dto.Usage, respo
 	switch result.Type {
 	case gjson.Number, gjson.String:
 	default:
+		common.SysError(fmt.Sprintf("passthrough billing: channel #%d model %s cost at %q is not a number (%s), falling back to local pricing", info.ChannelId, info.OriginModelName, path, truncateForLog(result.Raw, 120)))
 		return
 	}
 	cost := result.Float()
@@ -101,4 +103,32 @@ func ExtractPassthroughCost(info *relaycommon.RelayInfo, usage *dto.Usage, respo
 	}
 
 	usage.UpstreamCostUSD = &cost
+}
+
+// logPassthroughPathMiss reports an enabled-but-unproductive extraction: the
+// channel opted into passthrough billing yet the configured path yielded
+// nothing, so the request silently falls back to local ratios. The actual
+// usage object is included so the correct path can be identified from the log
+// instead of having to capture upstream traffic.
+//
+// Streaming feeds every chunk through the extractor and most chunks legitimately
+// carry no usage, so only bodies that look like they should hold a cost (i.e.
+// they contain a usage object) are reported; otherwise every stream would emit
+// dozens of false alarms.
+func logPassthroughPathMiss(info *relaycommon.RelayInfo, path string, responseBody []byte) {
+	usageNode := gjson.GetBytes(responseBody, "usage")
+	if !usageNode.Exists() {
+		return
+	}
+	common.SysError(fmt.Sprintf(
+		"passthrough billing: channel #%d model %s found no cost at %q; upstream usage was %s. Set the channel's passthrough cost path to the correct field, or disable passthrough billing for this channel.",
+		info.ChannelId, info.OriginModelName, path, truncateForLog(usageNode.Raw, 400),
+	))
+}
+
+func truncateForLog(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "...(truncated)"
 }

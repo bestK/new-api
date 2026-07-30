@@ -176,6 +176,31 @@ func TestExtractPassthroughCostAnthropicStreamChunks(t *testing.T) {
 	assert.Equal(t, 0.04928818641791045, *usage.UpstreamCostUSD)
 }
 
+// TestExtractPassthroughCostPathMissLeavesCostUnset covers the diagnostic gap
+// that made a misconfigured path indistinguishable from a disabled channel: a
+// body carrying a usage object but no cost at the configured path must leave the
+// cost unset (falling back to local ratios) rather than charging zero. Stream
+// chunks without any usage object must stay silent so they do not spam the log.
+func TestExtractPassthroughCostPathMissLeavesCostUnset(t *testing.T) {
+	for _, body := range []string{
+		// usage present but no cost at the configured path -> reported
+		`{"usage":{"input_tokens":10,"output_tokens":2}}`,
+		// no usage at all (typical mid-stream chunk) -> silently ignored
+		`{"type":"content_block_delta","delta":{"text":"hi"}}`,
+	} {
+		info := &relaycommon.RelayInfo{
+			OriginModelName: "claude-sonnet",
+			ChannelMeta:     &relaycommon.ChannelMeta{ChannelType: constant.ChannelTypeAnthropic},
+		}
+		info.ChannelOtherSettings.PassthroughBillingEnabled = true
+		usage := &dto.Usage{}
+
+		ExtractPassthroughCost(info, usage, []byte(body))
+
+		assert.Nil(t, usage.UpstreamCostUSD, "body: %s", body)
+	}
+}
+
 func TestExtractPassthroughCostNilSafety(t *testing.T) {
 	// Must not panic on nil/empty inputs, including a nil ChannelMeta.
 	ExtractPassthroughCost(nil, &dto.Usage{}, []byte(`{}`))
