@@ -148,9 +148,13 @@ func geminiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	var usage = &dto.Usage{}
 	var imageCount int
 	var hasBillableUsageMetadata bool
+	var lastStreamData string
 	responseText := strings.Builder{}
 
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
+		if len(data) > 0 {
+			lastStreamData = data
+		}
 		var geminiResponse dto.GeminiChatResponse
 		if err := common.UnmarshalJsonStr(data, &geminiResponse); err != nil {
 			sr.Stop(fmt.Errorf("unmarshal: %w", err))
@@ -202,6 +206,8 @@ func geminiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	} else {
 		patchGeminiZeroCompletionUsage(c, info, usage, responseText.String(), imageCount)
 	}
+
+	service.ExtractPassthroughCost(info, usage, common.StringToByteSlice(lastStreamData))
 
 	return usage, nil
 }
@@ -363,6 +369,10 @@ func GeminiChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.R
 	usage := buildUsageFromGeminiResponse(c, info, &geminiResponse)
 
 	fullTextResponse.Usage = usage
+
+	// Extract passthrough cost from the original upstream body before the
+	// format-conversion branches below overwrite responseBody.
+	service.ExtractPassthroughCost(info, &usage, responseBody)
 
 	switch info.RelayFormat {
 	case types.RelayFormatOpenAI:

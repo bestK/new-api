@@ -241,6 +241,13 @@ type Usage struct {
 
 	// OpenRouter Params
 	Cost any `json:"cost,omitempty"`
+
+	// UpstreamCostUSD carries the validated upstream-reported cost (in USD) used
+	// for passthrough billing. It is populated by the relay handler after
+	// extracting and bounding the raw upstream cost value; nil means no valid
+	// passthrough cost was reported. This is a strongly-typed field on purpose:
+	// the untyped Cost field above is unsafe to read directly for billing.
+	UpstreamCostUSD *float64 `json:"upstream_cost_usd,omitempty"`
 }
 
 type OpenAIVideoResponse struct {

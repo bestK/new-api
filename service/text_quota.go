@@ -17,6 +17,7 @@ import (
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 
 	"github.com/bytedance/gopkg/util/gopool"
@@ -66,6 +67,11 @@ type textQuotaSummary struct {
 	AudioInputPrice        float64
 	ToolSurchargeItems     []ToolSurchargeItem
 	ToolCallSurchargeQuota decimal.Decimal
+	// PassthroughCostUSD is the validated upstream cost (USD) that drove this
+	// request's charge when billing via BillingModePassthrough. nil means the
+	// request did not settle via passthrough (either not configured, or the
+	// upstream cost was missing/invalid and billing fell back to local pricing).
+	PassthroughCostUSD *float64
 }
 
 // hasBillableUsage reports whether this request should incur any charge.
@@ -300,6 +306,32 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 	ratio := dModelRatio.Mul(dGroupRatio)
 	summary.ToolCallSurchargeQuota = calculateTextToolCallSurcharge(ctx, relayInfo, &summary)
 
+	// Passthrough billing: when the relay handler extracted a valid upstream cost
+	// (only populated for BillingModePassthrough models, and only after bounds
+	// validation — see ExtractPassthroughCost), the charge is that upstream USD
+	// cost converted to quota, scaled by the group ratio and any OtherRatios.
+	// This deliberately bypasses model/completion/cache ratios. When no valid
+	// cost is present (upstream omitted it or it failed validation), fall through
+	// to the local ratio/price branches so the request is never billed as free.
+	if usage.UpstreamCostUSD != nil {
+		summary.PassthroughCostUSD = usage.UpstreamCostUSD
+		quotaCalculateDecimal := decimal.NewFromFloat(*usage.UpstreamCostUSD).
+			Mul(dQuotaPerUnit).
+			Mul(dGroupRatio)
+		quotaCalculateDecimal = relayInfo.PriceData.ApplyOtherRatiosToDecimal(quotaCalculateDecimal)
+		quotaCalculateDecimal = quotaCalculateDecimal.Add(summary.ToolCallSurchargeQuota)
+		quota, clamp := common.QuotaFromDecimalChecked(quotaCalculateDecimal)
+		summary.Quota = quota
+		noteQuotaClamp(relayInfo, clamp)
+
+		if !summary.hasBillableUsage() {
+			summary.Quota = 0
+		} else if !dGroupRatio.IsZero() && summary.Quota == 0 {
+			summary.Quota = 1
+		}
+		return summary
+	}
+
 	var audioInputQuota decimal.Decimal
 	if !relayInfo.PriceData.UsePrice {
 		baseTokens := dPromptTokens
@@ -477,6 +509,10 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		other = GenerateTextOtherInfo(ctx, relayInfo, summary.ModelRatio, summary.GroupRatio, summary.CompletionRatio, summary.CacheTokens, summary.CacheRatio, summary.ModelPrice, relayInfo.PriceData.GroupRatioInfo.GroupSpecialRatio)
 	}
 	appendUsageBillingPathForLog(other, common.GetContextKeyBool(ctx, constant.ContextKeyLocalCountTokens), originUsage)
+	if summary.PassthroughCostUSD != nil {
+		other["billing_mode"] = billing_setting.BillingModePassthrough
+		other["upstream_cost_usd"] = *summary.PassthroughCostUSD
+	}
 	if adminRejectReason != "" {
 		other["reject_reason"] = adminRejectReason
 	}

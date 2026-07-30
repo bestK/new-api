@@ -1052,3 +1052,131 @@ func TestAppendToolSurchargeLogInfoWritesOnlyStructuredFields(t *testing.T) {
 	assert.NotContains(t, other, "image_generation_call")
 	assert.NotContains(t, other, "image_generation_call_price")
 }
+
+// floatPtr returns a pointer to f for building UpstreamCostUSD test inputs.
+func floatPtr(f float64) *float64 { return &f }
+
+// TestCalculateTextQuotaSummaryPassthrough verifies that a valid upstream cost
+// drives the charge as cost * QuotaPerUnit * groupRatio (plus OtherRatios),
+// bypassing model/completion/cache ratios, and that oversized costs saturate to
+// the int32 quota bound with an audit clamp recorded on relayInfo.
+func TestCalculateTextQuotaSummaryPassthrough(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	tests := []struct {
+		name          string
+		cost          *float64
+		groupRatio    float64
+		usage         *dto.Usage
+		wantQuota     int
+		wantClamp     bool
+		wantCostOnLog bool
+	}{
+		{
+			// 0.002 USD * 500000 QuotaPerUnit * 1.0 = 1000
+			name:          "basic cost, group ratio 1",
+			cost:          floatPtr(0.002),
+			groupRatio:    1,
+			usage:         &dto.Usage{PromptTokens: 100, CompletionTokens: 50, TotalTokens: 150},
+			wantQuota:     1000,
+			wantCostOnLog: true,
+		},
+		{
+			// 0.002 * 500000 * 2.0 = 2000 (group ratio applied per decision (a))
+			name:          "group ratio scales cost",
+			cost:          floatPtr(0.002),
+			groupRatio:    2,
+			usage:         &dto.Usage{PromptTokens: 100, CompletionTokens: 50, TotalTokens: 150},
+			wantQuota:     2000,
+			wantCostOnLog: true,
+		},
+		{
+			// cost far above what int32 quota can hold: 5000 * 500000 = 2.5e9 > MaxInt32
+			name:          "oversized cost saturates to MaxQuota with clamp",
+			cost:          floatPtr(5000),
+			groupRatio:    1,
+			usage:         &dto.Usage{PromptTokens: 10, CompletionTokens: 10, TotalTokens: 20},
+			wantQuota:     common.MaxQuota,
+			wantClamp:     true,
+			wantCostOnLog: true,
+		},
+		{
+			// A tiny non-zero cost with billable usage must charge at least 1.
+			name:          "tiny cost floors to 1 when usage is billable",
+			cost:          floatPtr(0.0000001),
+			groupRatio:    1,
+			usage:         &dto.Usage{PromptTokens: 1, CompletionTokens: 1, TotalTokens: 2},
+			wantQuota:     1,
+			wantCostOnLog: true,
+		},
+		{
+			// No billable usage -> quota forced to 0 even with a reported cost.
+			name:          "no billable usage yields zero",
+			cost:          floatPtr(0.002),
+			groupRatio:    1,
+			usage:         &dto.Usage{PromptTokens: 0, CompletionTokens: 0, TotalTokens: 0},
+			wantQuota:     0,
+			wantCostOnLog: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(w)
+
+			relayInfo := &relaycommon.RelayInfo{
+				RelayFormat:     types.RelayFormatOpenAI,
+				OriginModelName: "passthrough-model",
+				PriceData: hosttypes.PriceData{
+					// Local ratios are deliberately non-zero to prove they are
+					// NOT used when an upstream cost is present.
+					ModelRatio:      99,
+					CompletionRatio: 99,
+					GroupRatioInfo:  hosttypes.GroupRatioInfo{GroupRatio: tc.groupRatio},
+				},
+				StartTime: time.Now(),
+			}
+			tc.usage.UpstreamCostUSD = tc.cost
+
+			summary := calculateTextQuotaSummary(ctx, relayInfo, tc.usage)
+
+			require.Equal(t, tc.wantQuota, summary.Quota)
+			require.NotNil(t, summary.PassthroughCostUSD)
+			assert.Equal(t, *tc.cost, *summary.PassthroughCostUSD)
+			if tc.wantClamp {
+				require.NotNil(t, relayInfo.QuotaClamp)
+				assert.Equal(t, common.QuotaClampOverflow, relayInfo.QuotaClamp.Kind)
+			} else {
+				assert.Nil(t, relayInfo.QuotaClamp)
+			}
+		})
+	}
+}
+
+// TestCalculateTextQuotaSummaryPassthroughFallsBackWithoutCost verifies that a
+// passthrough model with no extracted upstream cost falls back to local ratio
+// billing rather than charging zero.
+func TestCalculateTextQuotaSummaryPassthroughFallsBackWithoutCost(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+
+	relayInfo := &relaycommon.RelayInfo{
+		RelayFormat:     types.RelayFormatOpenAI,
+		OriginModelName: "passthrough-model",
+		PriceData: hosttypes.PriceData{
+			ModelRatio:      1,
+			CompletionRatio: 1,
+			GroupRatioInfo:  hosttypes.GroupRatioInfo{GroupRatio: 1},
+		},
+		StartTime: time.Now(),
+	}
+	usage := &dto.Usage{PromptTokens: 100, CompletionTokens: 100, TotalTokens: 200} // no UpstreamCostUSD
+
+	summary := calculateTextQuotaSummary(ctx, relayInfo, usage)
+
+	// Local ratio path: (100 + 100*1) * (1*1) = 200
+	require.Equal(t, 200, summary.Quota)
+	require.Nil(t, summary.PassthroughCostUSD)
+}

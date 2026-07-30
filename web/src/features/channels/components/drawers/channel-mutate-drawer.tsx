@@ -297,6 +297,7 @@ const SENSITIVE_FORM_FIELDS = [
   'allow_speed',
   'claude_beta_query',
   'disable_task_polling_sleep',
+  'passthrough_cost_path',
   'upstream_model_update_check_enabled',
   'upstream_model_update_auto_sync_enabled',
   'upstream_model_update_ignored_models',
@@ -345,6 +346,7 @@ function hasAdvancedSettingsValues(values: ChannelFormValues): boolean {
     (values.http2_connection_shards != null &&
       values.http2_connection_shards > 1) ||
     values.claude_beta_query ||
+    values.passthrough_cost_path?.trim() ||
     values.upstream_model_update_check_enabled ||
     values.upstream_model_update_auto_sync_enabled ||
     values.upstream_model_update_ignored_models?.trim()
@@ -4187,6 +4189,30 @@ export function ChannelMutateDrawer({
                                   <FormDescription>
                                     {t(
                                       'Network proxy for this channel (supports HTTP, HTTPS, SOCKS5, and SOCKS5H)'
+                                    )}
+                                  </FormDescription>
+                                  <FormMessage />
+                                </FormItem>
+                              )}
+                            />
+
+                            <FormField
+                              control={form.control}
+                              name='passthrough_cost_path'
+                              render={({ field }) => (
+                                <FormItem>
+                                  <FormLabel>
+                                    {t('Passthrough Cost Path')}
+                                  </FormLabel>
+                                  <FormControl>
+                                    <Input
+                                      placeholder='usage.cost'
+                                      {...field}
+                                    />
+                                  </FormControl>
+                                  <FormDescription>
+                                    {t(
+                                      'gjson path to the upstream cost amount (USD) used for passthrough billing. Leave empty to use the default usage.cost. Only applies to models set to passthrough billing mode.'
                                     )}
                                   </FormDescription>
                                   <FormMessage />

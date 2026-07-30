@@ -200,7 +200,11 @@ func ClaudeStreamHandler(c *gin.Context, resp *http.Response, info *relaycommon.
 		Usage:        &dto.Usage{},
 	}
 	var err *types.NewAPIError
+	var lastStreamData string
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
+		if len(data) > 0 {
+			lastStreamData = data
+		}
 		err = HandleStreamResponseData(c, info, claudeInfo, data)
 		if err != nil {
 			sr.Stop(err)
@@ -211,6 +215,10 @@ func ClaudeStreamHandler(c *gin.Context, resp *http.Response, info *relaycommon.
 	}
 
 	HandleStreamFinalResponse(c, info, claudeInfo)
+	// Passthrough cost, when reported, arrives on the final SSE event
+	// (message_delta / message_stop) for OpenAI-compatible upstreams that proxy
+	// Claude responses with a cost field.
+	service.ExtractPassthroughCost(info, claudeInfo.Usage, common.StringToByteSlice(lastStreamData))
 	return claudeInfo.Usage, nil
 }
 
@@ -284,5 +292,6 @@ func ClaudeHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayI
 	if handleErr != nil {
 		return nil, handleErr
 	}
+	service.ExtractPassthroughCost(info, claudeInfo.Usage, responseBody)
 	return claudeInfo.Usage, nil
 }

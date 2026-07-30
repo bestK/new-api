@@ -11,9 +11,38 @@ import (
 const (
 	BillingModeRatio      = "ratio"
 	BillingModeTieredExpr = "tiered_expr"
-	BillingModeField      = "billing_mode"
-	BillingExprField      = "billing_expr"
+	// BillingModePassthrough bills using the cost/price amount returned by the
+	// upstream channel instead of local ratios. The upstream cost (USD) is
+	// converted to quota at settle time; pre-consume still uses the model's
+	// configured ratio/price as a fallback estimate.
+	BillingModePassthrough = "passthrough"
+	BillingModeField       = "billing_mode"
+	BillingExprField       = "billing_expr"
 )
+
+// PassthroughMaxCostUSD is the hard upper bound (in USD) for a single request's
+// upstream-reported cost under BillingModePassthrough. Upstream cost values are
+// untrusted, so any amount above this ceiling is rejected to prevent runaway or
+// wrapped-negative charges.
+const PassthroughMaxCostUSD = 100.0
+
+// IsPassthrough reports whether the given model bills via upstream cost passthrough.
+func IsPassthrough(model string) bool {
+	return GetBillingMode(model) == BillingModePassthrough
+}
+
+// SetBillingMode sets the billing mode for a single model in the in-memory
+// config. An empty mode removes the override, restoring the default (ratio).
+func SetBillingMode(model, mode string) {
+	if billingSetting.BillingMode == nil {
+		billingSetting.BillingMode = make(map[string]string)
+	}
+	if mode == "" {
+		delete(billingSetting.BillingMode, model)
+		return
+	}
+	billingSetting.BillingMode[model] = mode
+}
 
 // BillingSetting is managed by config.GlobalConfig.Register.
 // DB keys: billing_setting.billing_mode, billing_setting.billing_expr

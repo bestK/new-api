@@ -85,6 +85,11 @@ type ChannelOtherSettings struct {
 	UpstreamModelUpdateLastRemovedModels  []string              `json:"upstream_model_update_last_removed_models,omitempty"`  // 上次检测到的可删除模型
 	UpstreamModelUpdateIgnoredModels      []string              `json:"upstream_model_update_ignored_models,omitempty"`       // 手动忽略的模型
 	AdvancedCustom                        *AdvancedCustomConfig `json:"advanced_custom,omitempty"`
+	// PassthroughCostPath is a gjson path into the upstream response body used to
+	// extract the cost/price amount (USD) for passthrough billing. Empty falls
+	// back to the default "usage.cost". Only consulted for models configured with
+	// BillingModePassthrough.
+	PassthroughCostPath string `json:"passthrough_cost_path,omitempty"`
 }
 
 func (s *ChannelOtherSettings) IsOpenRouterEnterprise() bool {
